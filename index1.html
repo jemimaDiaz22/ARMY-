@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Army Bomb - Panel de Diagnóstico WebBLE</title>
+    <style>
+        :root {
+            --bg-color: #121214;
+            --card-bg: #1a1a1e;
+            --text-color: #e1e1e6;
+            --accent-purple: #8257e5;
+            --success: #04d361;
+            --danger: #f75a68;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            background: var(--card-bg);
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        }
+
+        h1 {
+            text-align: center;
+            color: var(--accent-purple);
+            margin-bottom: 5px;
+        }
+
+        .subtitle {
+            text-align: center;
+            font-size: 0.9rem;
+            color: #8d8d99;
+            margin-bottom: 25px;
+        }
+
+        .status-panel {
+            padding: 15px;
+            border-radius: 8px;
+            background: #202024;
+            margin-bottom: 20px;
+            border-left: 5px solid #323238;
+        }
+
+        .status-connected { border-left-color: var(--success); }
+        .status-disconnected { border-left-color: var(--danger); }
+
+        .btn-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-size: 0.95rem;
+        }
+
+        .btn-primary { background: var(--accent-purple); color: white; }
+        .btn-primary:hover { background: #9466ff; }
+        
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-danger:hover { background: #ff6b7b; }
+
+        .btn-color { color: white; text-shadow: 1px 1px 2px black; }
+
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .console {
+            background: #09090a;
+            color: #04d361;
+            font-family: 'Courier New', Courier, monospace;
+            padding: 15px;
+            border-radius: 6px;
+            height: 180px;
+            overflow-y: auto;
+            font-size: 0.85rem;
+            border: 1px solid #29292e;
+        }
+
+        section {
+            margin-bottom: 20px;
+            padding-top: 15px;
+            border-top: 1px solid #29292e;
+        }
+
+        h3 { margin-top: 0; color: #c4c4cc; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Army Bomb QA Tool 💜</h1>
+    <div class="subtitle">Interfaz de diagnóstico para Web Bluetooth API</div>
+
+    <div id="statusPanel" class="status-panel status-disconnected">
+        <strong>Estado:</strong> <span id="statusText">Desconectado</span><br>
+        <small id="deviceInfo" style="color: #8d8d99;">Ningún dispositivo seleccionado.</small>
+    </div>
+
+    <div class="btn-group">
+        <button class="btn-primary" onclick="conectar()">🔍 Buscar y Conectar</button>
+        <button class="btn-danger" onclick="desconectarForzado()">🔌 Desconexión Forzada</button>
+    </div>
+
+    <section id="testingTools" style="opacity: 0.5; pointer-events: none;">
+        <h3>Pruebas de Envío de Datos (Modo Manual)</h3>
+        <p style="font-size: 0.85rem; color: #8d8d99;">Nota: Los botones funcionarán una vez que configuremos la característica de escritura correcta abajo.</p>
+        
+        <div class="test-grid">
+            <button class="btn-color" style="background: #ff0000;" onclick="enviarComandoColor(255, 0, 0)">Rojo</button>
+            <button class="btn-color" style="background: #00ff00; color: black; text-shadow: none;" onclick="enviarComandoColor(0, 255, 0)">Verde</button>
+            <button class="btn-color" style="background: #0000ff;" onclick="enviarComandoColor(0, 0, 255)">Azul</button>
+            <button class="btn-color" style="background: #ff00ff;" onclick="enviarComandoColor(255, 0, 255)">Morado</button>
+            <button class="btn-color" style="background: #ffffff; color: black; text-shadow: none;" onclick="enviarComandoColor(255, 255, 255)">Blanco</button>
+            <button class="btn-color" style="background: #323238;" onclick="enviarComandoColor(0, 0, 0)">Apagar</button>
+        </div>
+    </section>
+
+    <section>
+        <h3>Consola de Diagnóstico</h3>
+        <div id="consoleLog" class="console">--- Esperando inicio de pruebas ---</div>
+    </section>
+</div>
+
+<script>
+    // Variables globales
+    let bleDevice = null;
+    let bleServer = null;
+    let rxCharacteristic = null; 
+
+    // UUIDs temporales (los cambiaremos cuando la consola nos dicte los reales)
+    let ARMY_BOMB_SERVICE_UUID = 0xffe0; 
+    let ARMY_BOMB_CHAR_UUID    = 0xffe1; 
+
+    function log(mensaje) {
+        const consola = document.getElementById('consoleLog');
+        const tiempo = new Date().toLocaleTimeString();
+        consola.innerHTML += `<br>[${tiempo}] ${mensaje}`;
+        consola.scrollTop = consola.scrollHeight; 
+    }
+
+    async function conectar() {
+        log("Iniciando escaneo Bluetooth...");
+        
+        if (!navigator.bluetooth) {
+            log("❌ ERROR: Tu navegador no soporta Web Bluetooth API.");
+            return;
+        }
+
+        try {
+            // ARREGLO: Aceptamos cualquier dispositivo para mapear sus servicios sin restricciones
+            bleDevice = await navigator.bluetooth.requestDevice({
+                acceptAllDevices: true
+            });
+
+            log(`Dispositivo seleccionado: ${bleDevice.name || 'Sin Nombre'}`);
+            document.getElementById('deviceInfo').innerText = `Conectando a: ${bleDevice.name || 'Dispositivo Bluetooth'}`;
+
+            bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+            log("Conectando al servidor GATT...");
+            bleServer = await bleDevice.gatt.connect();
+            
+            log("⚡ ¡Conexión básica establecida exitosamente!");
+            log("Analizando servicios internos del dispositivo...");
+
+            // ARREGLO: Escaneamos y listamos todos los servicios reales que tiene el lighstick
+            const services = await bleServer.getPrimaryServices();
+            log(`🔎 Se han detectado ${services.length} servicios disponibles:`);
+            
+            for (let service of services) {
+                log(`👉 SERVICIO ENCONTRADO (UUID): ${service.uuid}`);
+            }
+
+            log("--- Fin del escaneo de servicios ---");
+            log("Copia los UUIDs anteriores para identificar cuál controla las luces.");
+
+            // Activamos la interfaz para que no se congele
+            document.getElementById('statusPanel').className = "status-panel status-connected";
+            document.getElementById('statusText').innerText = "CONECTADO (MODO ANÁLISIS)";
+            
+            // Intentamos agarrar el primer servicio por defecto para pruebas básicas
+            if(services.length > 0) {
+                try {
+                    const mainService = services[0];
+                    const characteristics = await mainService.getCharacteristics();
+                    if(characteristics.length > 0) {
+                        rxCharacteristic = characteristics[0];
+                        document.getElementById('testingTools').style.opacity = "1";
+                        document.getElementById('testingTools').style.pointerEvents = "auto";
+                    }
+                } catch(e) {
+                    log("Nota: Para activar los botones de color necesitamos definir manualmente el UUID del servicio.");
+                }
+            }
+
+        } catch (error) {
+            log(`❌ Error en el proceso: ${error}`);
+            desconectarForzado();
+        }
+    }
+
+    async function enviarComandoColor(r, g, b) {
+        if (!rxCharacteristic) {
+            log("❌ Error: Característica de escritura no configurada todavía.");
+            return;
+        }
+
+        try {
+            log(`Enviando comando RGB provisional: (${r}, ${g}, ${b})...`);
+            const payload = new Uint8Array([0x01, r, g, b, 0x00]); 
+            await rxCharacteristic.writeValue(payload);
+            log(`👉 Comando enviado.`);
+        } catch (error) {
+            log(`❌ Falló el envío: ${error}. Esto es normal hasta que configuremos el UUID real detectado.`);
+        }
+    }
+
+    function onDisconnected() {
+        log("⚠️ El dispositivo se ha desconectado.");
+        resetUI();
+    }
+
+    function desconectarForzado() {
+        if (bleDevice && bleDevice.gatt.connected) {
+            log("Forzando desconexión...");
+            bleDevice.gatt.disconnect();
+        } else {
+            log("No hay ninguna conexión activa.");
+        }
+        resetUI();
+    }
+
+    function resetUI() {
+        document.getElementById('statusPanel').className = "status-panel status-disconnected";
+        document.getElementById('statusText').innerText = "Desconectado";
+        document.getElementById('deviceInfo').innerText = "Ningún dispositivo seleccionado.";
+        document.getElementById('testingTools').style.opacity = "0.5";
+        document.getElementById('testingTools').style.pointerEvents = "none";
+        bleDevice = null;
+        bleServer = null;
+        rxCharacteristic = null;
+    }
+</script>
+
+</body>
+</html>
